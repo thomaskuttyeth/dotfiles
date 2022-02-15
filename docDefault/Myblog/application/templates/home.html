@@ -1,0 +1,17 @@
+{% extends 'layout.html' %}
+{% block content %}
+{% for post in posts %}
+    <br>
+    <div class = "card w-85 border border-left">
+        <div class = "card-body border-left ">
+            <h4 class = "card-title"> {{post.title}}</h5>
+            <h6 class="card-subtitle mb-2 text-muted">{{post.author}} - {{post.datetime}}</h6>
+            <p class = "card-text">{{post.content}}</p>
+        </div>
+
+    </div>
+
+{% endfor %}
+
+
+{% endblock content %}

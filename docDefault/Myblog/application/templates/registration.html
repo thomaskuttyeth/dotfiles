@@ -1,0 +1,33 @@
+{% extends "layout.html"%}
+{% block content %}
+<div class ='text-align-center'>
+    <h3 class="">Application Registration</h3><hr>
+    <form method = "POST", class ='text-align-center'action="">
+      <div class="form-group">
+        {{form.email.label}}
+        <br>
+        {{form.email(class="form-control-lg")}}
+      </div>
+      <div class="form-group">
+        {{form.password.label(class="form-group")}}
+        <br>
+        {{form.password(class="form-control-lg")}}
+      </div>
+      <div class="form-group">
+        {{form.confirm_password.label(class="label")}}
+        <br>
+        {{form.confirm_password(class="form-control-lg")}}
+      </div>
+      <div class="form-group">
+        {{form.submit(class="btn btn-outline-info")}}
+      </div>
+    </form>
+</div>
+
+
+
+
+{% endblock content%}
+
+
+
