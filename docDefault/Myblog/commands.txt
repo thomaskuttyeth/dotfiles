@@ -1,0 +1,8 @@
+User.query.all()
+User.query.first()
+User.query.filter_by(username= '').all()
+
+user = User.query.get(id = 1)
+user.posts
+user.id
+user.password

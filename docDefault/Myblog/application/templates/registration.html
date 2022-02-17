@@ -4,6 +4,11 @@
     <h3 class="">Application Registration</h3><hr>
     <form method = "POST", class ='text-align-center'action="">
       <div class="form-group">
+        {{form.username.label}}
+        <br>
+        {{form.username(class="form-control-lg")}}
+      </div>
+      <div class="form-group">
         {{form.email.label}}
         <br>
         {{form.email(class="form-control-lg")}}
