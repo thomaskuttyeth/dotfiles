@@ -1,0 +1,200 @@
+- creating a cloudsql instance mysql
+- customizing the instance ( instance id, password, region and zonal availability) 
+- machine type - cores and memory, storage
+
+-- connect to this instance using open cloud shell option in the instance details 
+-- gcloud sql connect {instance_id} --user=root --quiet 
+-- getting the mysql shell 
+-- can perform sql statements and queries in the mysql console
+-- lab excersice sql script ( recommendation_spark database) 
+-- with three tables ( recommendation, rating, accomodation) 
+
+CREATE DATABASE IF NOT EXISTS recommendation_spark;
+USE recommendation_spark;
+DROP TABLE IF EXISTS Recommendation;
+DROP TABLE IF EXISTS Rating;
+DROP TABLE IF EXISTS Accommodation;
+CREATE TABLE IF NOT EXISTS Accommodation
+(
+  id varchar(255),
+  title varchar(255),
+  location varchar(255),
+  price int,
+  rooms int,
+  rating float,
+  type varchar(255),
+  PRIMARY KEY (ID)
+);
+CREATE TABLE  IF NOT EXISTS Rating
+(
+  userId varchar(255),
+  accoId varchar(255),
+  rating int,
+  PRIMARY KEY(accoId, userId),
+  FOREIGN KEY (accoId)
+    REFERENCES Accommodation(id)
+);
+CREATE TABLE  IF NOT EXISTS Recommendation
+(
+  userId varchar(255),
+  accoId varchar(255),
+  prediction float,
+  PRIMARY KEY(userId, accoId),
+  FOREIGN KEY (accoId)
+    REFERENCES Accommodation(id)
+);
+SHOW DATABASES;
+
+use {DATABASE_NAME}
+show tables
+
+
+# storage section 
+-- go to the storage 
+-- select cloud storage 
+-- browser 
+-- create bucket 
+-- give a unique bucket name (project name will be unique) 
+-- upload the files to the bucket 
+
+
+
+# loading the data from the cloud storage into cloud sql tables 
+-- click on import 
+-- broswer - select bucket name - select dataset 
+-- go to the editor 
+-- create the script for the creating database and tables 
+-- go the mysql shell 
+-- run the following command 
+-- source {SCRIPT.sql}
+
+---- NOTES : shell scripting 
+echo "Creating bucket: gs://$DEVSHELL_PROJECT_ID"
+gsutil mb gs://$DEVSHELL_PROJECT_ID
+echo "Copying data to our storage from public dataset"
+gsutil cp gs://cloud-training/bdml/v2.0/data/accommodation.csv gs://$DEVSHELL_PROJECT_ID
+gsutil cp gs://cloud-training/bdml/v2.0/data/rating.csv gs://$DEVSHELL_PROJECT_ID
+echo "Show the files in our bucket"
+gsutil ls gs://$DEVSHELL_PROJECT_ID
+echo "View some sample data"
+gsutil cat gs://$DEVSHELL_PROJECT_ID/accommodation.csv
+
+
+# we uploaded  the datasets in the cloud storage 
+# now we need to import the dataset from cloud storage to the respective tables in the cloud sql 
+# this can be done using the import button ( can be found in the sql instance page) 
+
+
+
+-------------------- using dataproc to train the recommendations machine learning model based on users' previous ratings. 
+Google Cloud Dataproc lets you provision Apache Hadoop clusters and connect to underlying analytic data stores.
+* need to create a list of recommendations for every user in the database 
+
+- launch the dataproc 
+- from the navigation menu
+- create cluster
+- set the region and zone as per the sql instance 
+- configure the nodes ( worker nodes, master nodes) 
+
+
+echo "Authorizing Cloud Dataproc to connect with Cloud SQL"
+CLUSTER=rentals
+CLOUDSQL=mysql-instance
+ZONE=us-central1-c
+NWORKERS=2
+machines="$CLUSTER-m"
+for w in `seq 0 $(($NWORKERS - 1))`; do
+   machines="$machines $CLUSTER-w-$w"
+done
+echo "Machines to authorize: $machines in $ZONE ... finding their IP addresses"
+ips=""
+for machine in $machines; do
+    IP_ADDRESS=$(gcloud compute instances describe $machine --zone=$ZONE --format='value(networkInterfaces.accessConfigs[].natIP)' | sed "s/\['//g" | sed "s/'\]//g" )/32
+    echo "IP address of $machine is $IP_ADDRESS"
+    if [ -z  $ips ]; then
+       ips=$IP_ADDRESS
+    else
+       ips="$ips,$IP_ADDRESS"
+    fi
+done
+echo "Authorizing [$ips] to access cloudsql=$CLOUDSQL"
+gcloud sql instances patch $CLOUDSQL --authorized-networks $ips
+
+
+
+------------------
+dataproc cluster optional components 
+Patching Cloud SQL instance...done.  the above bash script is for patching 
+
+copying the ip address - sql instance : 34.134.181.7
+
+gsutil cp gs://cloud-training/bdml/v2.0/model/train_and_apply.py train_and_apply.py
+cloudshell edit train_and_apply.py
+
+-- changing the ip address and the sql instance password in the python script 
+
+training python script
+############################################
+import os
+import sys
+import pickle
+import itertools
+from math import sqrt
+from operator import add
+from os.path import join, isfile, dirname
+from pyspark import SparkContext, SparkConf, SQLContext
+from pyspark.mllib.recommendation import ALS, MatrixFactorizationModel, Rating
+from pyspark.sql.types import StructType, StructField, StringType, FloatType
+
+# MAKE EDITS HERE
+CLOUDSQL_INSTANCE_IP = '34.134.181.7'   # <---- CHANGE (database server IP)
+CLOUDSQL_DB_NAME = 'recommendation_spark' # <--- leave as-is
+CLOUDSQL_USER = 'root'  # <--- leave as-is
+CLOUDSQL_PWD  = '1234'  # <---- CHANGE
+
+# DO NOT MAKE EDITS BELOW
+conf = SparkConf().setAppName("train_model")
+sc = SparkContext(conf=conf)
+sqlContext = SQLContext(sc)
+
+jdbcDriver = 'com.mysql.jdbc.Driver'
+jdbcUrl    = 'jdbc:mysql://%s:3306/%s?user=%s&password=%s' % (CLOUDSQL_INSTANCE_IP, CLOUDSQL_DB_NAME, CLOUDSQL_USER, CLOUDSQL_PWD)
+
+# checkpointing helps prevent stack overflow errors
+sc.setCheckpointDir('checkpoint/')
+
+# Read the ratings and accommodations data from Cloud SQL
+dfRates = sqlContext.read.format('jdbc').options(driver=jdbcDriver, url=jdbcUrl, dbtable='Rating', useSSL='false').load()
+dfAccos = sqlContext.read.format('jdbc').options(driver=jdbcDriver, url=jdbcUrl, dbtable='Accommodation', useSSL='false').load()
+print("read ...")
+
+# train the model
+model = ALS.train(dfRates.rdd, 20, 20) # you could tune these numbers, but these are reasonable choices
+print("trained ...")
+
+# use this model to predict what the user would rate accommodations that she has not rated
+allPredictions = None
+for USER_ID in range(0, 100):
+  dfUserRatings = dfRates.filter(dfRates.userId == USER_ID).rdd.map(lambda r: r.accoId).collect()
+  rddPotential  = dfAccos.rdd.filter(lambda x: x[0] not in dfUserRatings)
+  pairsPotential = rddPotential.map(lambda x: (USER_ID, x[0]))
+  predictions = model.predictAll(pairsPotential).map(lambda p: (str(p[0]), str(p[1]), float(p[2])))
+  predictions = predictions.takeOrdered(5, key=lambda x: -x[2]) # top 5
+  print("predicted for user={0}".format(USER_ID))
+  if (allPredictions == None):
+    allPredictions = predictions
+  else:
+    allPredictions.extend(predictions)
+
+# write them
+schema = StructType([StructField("userId", StringType(), True), StructField("accoId", StringType(), True), StructField("prediction", FloatType(), True)])
+dfToSave = sqlContext.createDataFrame(allPredictions, schema)
+dfToSave.write.jdbc(url=jdbcUrl, table='Recommendation', mode='overwrite')
+
+
+gsutil cp train_and_apply.py gs://$DEVSHELL_PROJECT_ID
+
+
+-- go to the dataproc and select the cluster 
+-- submit job
+-- give the pyspark script and add restart count in the job details
